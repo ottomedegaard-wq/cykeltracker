@@ -75,7 +75,7 @@ const TEXT = {
   outboundPlaceholder: "e.g. Roskilde Cathedral",
   homeWaypoint: "Home Waypoint (Return via)",
   homePlaceholder: "e.g. Ballerup",
-  openMapBtn: "Open Manual Route in Maps",
+  openMapBtn: "Show route on map",
   gpsLoopBtn: "Generate Loop from my Location",
   fetchingLocation: "Fetching location...",
   locationError: "Could not find your location. Check GPS permissions.",
@@ -119,8 +119,8 @@ const XP_PER_LEVEL = 500;
 const ROAD_FACTOR = 1.3;
 const LOOP_POINTS = 3;
 
-// Builds a Google Maps cycling route that leaves and returns to the start as a
-// real loop. The start and LOOP_POINTS turn points sit evenly on a circle that
+// Picks the points for a cycling route that leaves and returns to the start as
+// a real loop. The start and LOOP_POINTS turn points sit evenly on a circle that
 // passes through the start, so you ride out one way and come home another.
 const buildLoopPoints = (lat, lng, distKm) => {
   const corners = LOOP_POINTS + 1;
@@ -153,12 +153,13 @@ const buildLoopPoints = (lat, lng, distKm) => {
   return [start, ...waypoints, start];
 };
 
-// Google Maps cycling directions through the loop points (first = last = start).
-const loopMapsUrl = (points) => {
-  const fmt = (p) => `${p.lat.toFixed(5)},${p.lng.toFixed(5)}`;
-  const start = fmt(points[0]);
-  const via = points.slice(1, -1).map(fmt).join('|');
-  return `https://www.google.com/maps/dir/?api=1&origin=${start}&destination=${start}&waypoints=${encodeURIComponent(via)}&travelmode=bicycling`;
+// Turns a place name or address into { lat, lng } using OpenStreetMap
+// (Nominatim). Returns null when nothing is found.
+const geocode = async (query) => {
+  const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(query)}`);
+  const data = await res.json();
+  if (!data || data.length === 0) return null;
+  return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
 };
 
 const haversineKm = (a, b) => {
@@ -190,10 +191,10 @@ const sampleAlongLine = (line, count) => {
 
 const ELEVATION_SAMPLES = 100; // Open-Meteo allows up to 100 points per request
 
-// Gets the real bike route along the roads (OpenStreetMap routing), then the
+// Gets the bike route along the roads (OpenStreetMap routing), then the
 // height above sea level at 100 points along it (Open-Meteo). Both are free
 // and need no API key.
-const fetchLoopElevation = async (points) => {
+const fetchRouteDetails = async (points) => {
   const coords = points.map((p) => `${p.lng.toFixed(5)},${p.lat.toFixed(5)}`).join(';');
   const routeRes = await fetch(`https://routing.openstreetmap.de/routed-bike/route/v1/driving/${coords}?overview=full&geometries=geojson`);
   const routeData = await routeRes.json();
@@ -425,7 +426,9 @@ export default function App() {
   const [isFetchingGPS, setIsFetchingGPS] = useState(false);
   const [isFetchingAddress, setIsFetchingAddress] = useState(false);
   const [plannerErrorMsg, setPlannerErrorMsg] = useState(null);
-  const [generatedMapsUrl, setGeneratedMapsUrl] = useState(null);
+  const [routeSource, setRouteSource] = useState(null); // 'loop' | 'manual': which planner made the route shown
+  const [isFetchingManual, setIsFetchingManual] = useState(false);
+  const [manualErrorMsg, setManualErrorMsg] = useState(null);
   const [elevation, setElevation] = useState(null); // null | { status: 'loading' | 'error' } | { status: 'ready', ...data }
   const elevationRequest = useRef(0);
   const [routeHover, setRouteHover] = useState(null); // index into elevation.profile
@@ -436,10 +439,8 @@ export default function App() {
   // Shows an "Open route" button in the app and also tries to open Maps
   // straight away. Phones often block tabs opened after a wait, so the
   // button is the reliable way in.
-  const openLoopRoute = (points) => {
-    const mapsUrl = loopMapsUrl(points);
-    setGeneratedMapsUrl(mapsUrl);
-    window.open(mapsUrl, '_blank');
+  const showRoute = (points, source) => {
+    setRouteSource(source);
     loadElevation(points);
   };
 
@@ -448,7 +449,7 @@ export default function App() {
     setElevation({ status: 'loading' });
     setRouteHover(null);
     try {
-      const data = await fetchLoopElevation(points);
+      const data = await fetchRouteDetails(points);
       if (id === elevationRequest.current) setElevation({ status: 'ready', ...data });
     } catch (err) {
       if (id === elevationRequest.current) setElevation({ status: 'error' });
@@ -457,7 +458,7 @@ export default function App() {
 
   const clearLoop = () => {
     elevationRequest.current++;
-    setGeneratedMapsUrl(null);
+    setRouteSource(null);
     setElevation(null);
   };
 
@@ -482,7 +483,7 @@ export default function App() {
         setIsFetchingGPS(false);
         const lat = position.coords.latitude;
         const lng = position.coords.longitude;
-        openLoopRoute(buildLoopPoints(lat, lng, dist));
+        showRoute(buildLoopPoints(lat, lng, dist), 'loop');
       },
       (error) => {
         setIsFetchingGPS(false);
@@ -514,19 +515,16 @@ export default function App() {
     setIsFetchingAddress(true);
 
     try {
-      const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(autoPlannerAddress)}`);
-      const data = await response.json();
-
-      if (!data || data.length === 0) {
+      const place = await geocode(autoPlannerAddress);
+      if (!place) {
         setIsFetchingAddress(false);
         setPlannerErrorMsg('Could not find the address.');
         return;
       }
 
-      const lat = parseFloat(data[0].lat);
-      const lng = parseFloat(data[0].lon);
+      const { lat, lng } = place;
 
-      openLoopRoute(buildLoopPoints(lat, lng, dist));
+      showRoute(buildLoopPoints(lat, lng, dist), 'loop');
       setIsFetchingAddress(false);
 
     } catch (err) {
@@ -535,26 +533,27 @@ export default function App() {
     }
   };
 
-  const handleOpenGoogleMapsRoute = () => {
-    if (!plannerStartLocation.trim()) return;
+  const handleShowManualRoute = async () => {
+    const names = [plannerStartLocation, plannerOutboundWaypoint, plannerHomeWaypoint].map((n) => n.trim());
+    if (!names[0] || (!names[1] && !names[2])) return;
 
-    const origin = encodeURIComponent(plannerStartLocation.trim());
-    const destination = encodeURIComponent(plannerStartLocation.trim());
-    
-    let waypointsArr = [];
-    if (plannerOutboundWaypoint.trim()) {
-      waypointsArr.push(encodeURIComponent(plannerOutboundWaypoint.trim()));
+    setManualErrorMsg(null);
+    clearLoop();
+    setIsFetchingManual(true);
+    try {
+      const [start, outbound, home] = await Promise.all(names.map((n) => (n ? geocode(n) : null)));
+      const missing = [[start, names[0]], [outbound, names[1]], [home, names[2]]].find(([place, name]) => name && !place);
+      if (missing) {
+        setManualErrorMsg(`Could not find "${missing[1]}". Try adding the town name.`);
+        return;
+      }
+      showRoute([start, outbound, home, start].filter(Boolean), 'manual');
+    } catch (err) {
+      setManualErrorMsg('Network error looking up the places.');
+    } finally {
+      setIsFetchingManual(false);
     }
-    if (plannerHomeWaypoint.trim()) {
-      waypointsArr.push(encodeURIComponent(plannerHomeWaypoint.trim()));
-    }
-
-    const waypointsQuery = waypointsArr.length > 0 ? `&waypoints=${waypointsArr.join('|')}` : '';
-    let mapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}${waypointsQuery}&travelmode=bicycling`;
-    
-    window.open(mapsUrl, '_blank');
   };
-
   const calculateEffectiveWear = (dist, w, t) => {
     let chainMult = 1.0;
     let tireMult = 1.0;
@@ -710,6 +709,41 @@ export default function App() {
       setBrakeErrorMsg({ type: 'error', text: `Brakes reset without XP (requires ${MIN_BRAKE_XP_KM} km).` });
     }
   };
+
+  // Map, numbers and hill graph for the route being shown.
+  const routeCard = elevation && (
+    <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+      <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-emerald-400 font-mono">
+        <Mountain className="w-4 h-4" /> {routeSource === 'loop' ? 'Your loop' : 'Your route'}
+      </div>
+      {elevation.status === 'loading' && (
+        <p className="text-xs text-slate-400">Loading map and hills...</p>
+      )}
+      {elevation.status === 'error' && (
+        <p className="text-xs text-rose-300">Could not load the map and hills. Check your internet and try again.</p>
+      )}
+      {elevation.status === 'ready' && (
+        <>
+          <RouteMap line={elevation.line} marker={routeHover !== null ? elevation.profile[routeHover] : null} />
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 font-mono">
+            {[
+              ['Distance', `${formatDistNum(elevation.distanceKm)} km`],
+              ['Climb', `↑ ${elevation.climb} m`],
+              ['Descent', `↓ ${elevation.descent} m`],
+              ['Highest', `${elevation.high} m`],
+            ].map(([label, value]) => (
+              <div key={label} className="bg-slate-900 rounded-lg p-2 border border-slate-800/60 min-w-0">
+                <div className="text-[9px] uppercase tracking-wider text-slate-500">{label}</div>
+                <div className="text-[11px] font-bold text-slate-100 whitespace-nowrap">{value}</div>
+              </div>
+            ))}
+          </div>
+          <ElevationChart profile={elevation.profile} low={elevation.low} high={elevation.high} hover={routeHover} setHover={setRouteHover} />
+          <p className="text-[10px] text-slate-500">Bike route from OpenStreetMap. Touch the hill graph to see that spot on the map.</p>
+        </>
+      )}
+    </div>
+  );
 
   const currentLevel = Math.floor(xp / XP_PER_LEVEL) + 1;
   const xpIntoCurrentLevel = xp % XP_PER_LEVEL;
@@ -1389,51 +1423,7 @@ export default function App() {
                   </button>
                 </div>
 
-                {generatedMapsUrl && (
-                  <a
-                    href={generatedMapsUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 py-3.5 px-4 rounded-xl font-black text-sm transition-all active:scale-95 shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2"
-                  >
-                    <Navigation className="w-4 h-4" />
-                    <span>Open route in Google Maps</span>
-                  </a>
-                )}
-
-                {elevation && (
-                  <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
-                    <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-emerald-400 font-mono">
-                      <Mountain className="w-4 h-4" /> Your loop
-                    </div>
-                    {elevation.status === 'loading' && (
-                      <p className="text-xs text-slate-400">Loading map and hills for this loop...</p>
-                    )}
-                    {elevation.status === 'error' && (
-                      <p className="text-xs text-rose-300">Could not load the map and hills for this loop. The route in Google Maps still works.</p>
-                    )}
-                    {elevation.status === 'ready' && (
-                      <>
-                        <RouteMap line={elevation.line} marker={routeHover !== null ? elevation.profile[routeHover] : null} />
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 font-mono">
-                          {[
-                            ['Distance', `${formatDistNum(elevation.distanceKm)} km`],
-                            ['Climb', `↑ ${elevation.climb} m`],
-                            ['Descent', `↓ ${elevation.descent} m`],
-                            ['Highest', `${elevation.high} m`],
-                          ].map(([label, value]) => (
-                            <div key={label} className="bg-slate-900 rounded-lg p-2 border border-slate-800/60 min-w-0">
-                              <div className="text-[9px] uppercase tracking-wider text-slate-500">{label}</div>
-                              <div className="text-[11px] font-bold text-slate-100 whitespace-nowrap">{value}</div>
-                            </div>
-                          ))}
-                        </div>
-                        <ElevationChart profile={elevation.profile} low={elevation.low} high={elevation.high} hover={routeHover} setHover={setRouteHover} />
-                        <p className="text-[10px] text-slate-500">Bike route from OpenStreetMap. Touch the hill graph to see that spot on the map. Google Maps may pick slightly different roads.</p>
-                      </>
-                    )}
-                  </div>
-                )}
+                {routeSource === 'loop' && routeCard}
 
                 {plannerErrorMsg && (
                   <div className="border p-3 rounded-xl flex items-start gap-2.5 mt-4 bg-rose-500/15 border-rose-500/40 text-rose-200">
@@ -1493,13 +1483,22 @@ export default function App() {
 
               <button
                 type="button"
-                onClick={handleOpenGoogleMapsRoute}
-                disabled={!plannerStartLocation.trim()}
+                onClick={handleShowManualRoute}
+                disabled={isFetchingManual || !plannerStartLocation.trim() || (!plannerOutboundWaypoint.trim() && !plannerHomeWaypoint.trim())}
                 className="w-full bg-slate-800 hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed text-white border border-slate-700 py-3.5 px-4 rounded-xl font-bold text-sm transition-all active:scale-95 flex items-center justify-center gap-2"
               >
                 <Navigation className="w-4 h-4" />
-                <span>{t.openMapBtn}</span>
+                <span>{isFetchingManual ? 'Finding places...' : t.openMapBtn}</span>
               </button>
+
+              {manualErrorMsg && (
+                <div className="border p-3 rounded-xl flex items-start gap-2.5 bg-rose-500/15 border-rose-500/40 text-rose-200">
+                  <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5" />
+                  <p className="text-xs leading-relaxed font-medium">{manualErrorMsg}</p>
+                </div>
+              )}
+
+              {routeSource === 'manual' && routeCard}
             </div>
           </section>
         )}

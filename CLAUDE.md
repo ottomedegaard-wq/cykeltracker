@@ -42,29 +42,25 @@ words). Keep replies short.
 - **16 trophies** in `badgesList`, unlocked automatically from history (First
   Ride, Mud Warrior, Century 100+ km, Speedster > 30 km/h, Hat Trick 3 rides,
   Trailblazer mud ride, Grand Master level 10, …).
-- **Route planner:**
+- **Route planner (no Google Maps; everything shows in the app):**
   - GPS loop: `buildLoopPoints` places the start plus `LOOP_POINTS` (3) turn
     points evenly on a circle through the start, in a random direction and
     rotation, so the route is a real loop, not an out-and-back. The circle is
     sized so straight-line length × `ROAD_FACTOR` (1.3) ≈ the desired distance.
-    Opens Google Maps `travelmode=bicycling` with origin = destination = start. Location is asked for
-    first, on the visible app tab (opening a tab first hid the permission prompt
-    and the lookup hung). Then `openLoopRoute` shows an "Open route in Google
-    Maps" button and also tries `window.open`, which phones may block.
-  - Address fallback: geocodes a typed start location via Nominatim, then
-    uses the same `buildLoopPoints`.
-  - Elevation: after a loop is made, `fetchLoopElevation` gets the real bike
-    route through the same points from OSRM (routing.openstreetmap.de,
-    `routed-bike`), samples 100 points along it, and gets heights from the
-    Open-Meteo elevation API (free, no key, max 100 points per call). The app
-    shows distance, climb, descent, highest point and an `ElevationChart`.
-    Google Maps may choose slightly different roads.
-  - In-app map: `RouteMap` draws the loop on OpenStreetMap tiles
-    (tile.openstreetmap.org, plain `<img>` tiles + SVG route, no map library),
-    auto-zoomed to fit, with the required "© OpenStreetMap contributors" credit.
-    Touching the hill chart shows that spot on the map. The Google Maps button
-    stays for turn-by-turn navigation.
-  - Manual planner: start, outbound waypoint, home waypoint → Google Maps.
+    Location is asked for on the visible app tab; don't open other tabs first.
+  - Address loop: `geocode` (Nominatim) finds the typed start, then the same
+    `buildLoopPoints`.
+  - Manual planner: geocodes start, outbound and home waypoints, and shows
+    start → outbound → home → start.
+  - `showRoute(points, source)` → `fetchRouteDetails` gets the bike route
+    through the points from OSRM (routing.openstreetmap.de, `routed-bike`),
+    samples 100 points along it, and gets heights from the Open-Meteo
+    elevation API (free, no key, max 100 points per call).
+  - `routeCard` shows `RouteMap` (OpenStreetMap tiles as plain `<img>` + SVG
+    route, auto-zoomed, with the required "© OpenStreetMap contributors"
+    credit), distance/climb/descent/highest, and `ElevationChart`. Touching the
+    chart marks that spot on the map. It renders under whichever planner made
+    the route (`routeSource`).
 
 ## Checking changes
 
