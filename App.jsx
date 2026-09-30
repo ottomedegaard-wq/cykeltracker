@@ -114,6 +114,47 @@ const MAX_BRAKE_KM = 200;
 const MIN_BRAKE_XP_KM = 150; 
 const XP_PER_LEVEL = 500;
 
+// Roads are never straight, so a route is roughly this much longer than the
+// straight lines between its points.
+const ROAD_FACTOR = 1.3;
+const LOOP_POINTS = 3;
+
+// Builds a Google Maps cycling route that leaves and returns to the start as a
+// real loop. The start and LOOP_POINTS turn points sit evenly on a circle that
+// passes through the start, so you ride out one way and come home another.
+const buildLoopMapsUrl = (lat, lng, distKm) => {
+  const corners = LOOP_POINTS + 1;
+  // Perimeter of a regular polygon inscribed in a circle of radius r is
+  // 2 * n * r * sin(PI / n). Solve for r so the road distance matches distKm.
+  const radiusKm = distKm / (ROAD_FACTOR * 2 * corners * Math.sin(Math.PI / corners));
+
+  const heading = Math.random() * 2 * Math.PI; // direction from start to circle centre
+  const direction = Math.random() < 0.5 ? 1 : -1; // clockwise or counter-clockwise
+  const kmPerDegLat = 111.32;
+  const kmPerDegLng = 111.32 * Math.cos(lat * (Math.PI / 180));
+
+  const toPoint = (bearing, km) => ({
+    lat: lat + (km * Math.cos(bearing)) / kmPerDegLat,
+    lng: lng + (km * Math.sin(bearing)) / kmPerDegLng,
+  });
+
+  const centre = toPoint(heading, radiusKm);
+  const startAngle = heading + Math.PI; // angle of the start, seen from the centre
+  const waypoints = [];
+  for (let i = 1; i <= LOOP_POINTS; i++) {
+    const angle = startAngle + direction * (i * 2 * Math.PI) / corners;
+    waypoints.push({
+      lat: centre.lat + (radiusKm * Math.cos(angle)) / kmPerDegLat,
+      lng: centre.lng + (radiusKm * Math.sin(angle)) / kmPerDegLng,
+    });
+  }
+
+  const fmt = (p) => `${p.lat.toFixed(5)},${p.lng.toFixed(5)}`;
+  const start = fmt({ lat, lng });
+  const via = waypoints.map(fmt).join('|');
+  return `https://www.google.com/maps/dir/?api=1&origin=${start}&destination=${start}&waypoints=${encodeURIComponent(via)}&travelmode=bicycling`;
+};
+
 export default function App() {
   const t = TEXT;
 
@@ -194,24 +235,8 @@ export default function App() {
         const lat = position.coords.latitude;
         const lng = position.coords.longitude;
 
-        // Compensation trick: 
-        // If they want a 30km loop, the midpoint in straight line (radius) should be around 15km.
-        // But roads curve, adding 20-30% extra distance. 
-        // We set the radius to 40% (0.4) of the total desired distance to compensate.
-        const radiusKm = dist * 0.4;
+        const mapsUrl = buildLoopMapsUrl(lat, lng, dist);
 
-        // Pick a random heading (0 to 360 degrees in radians)
-        const randomHeading = Math.random() * 2 * Math.PI;
-        
-        // Calculate the coordinate offset (Haversine approximation)
-        const deltaLat = (radiusKm * Math.cos(randomHeading)) / 111.32;
-        const deltaLng = (radiusKm * Math.sin(randomHeading)) / (111.32 * Math.cos(lat * (Math.PI/180)));
-
-        const wayLat = lat + deltaLat;
-        const wayLng = lng + deltaLng;
-
-        const mapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${lat},${lng}&destination=${lat},${lng}&waypoints=${wayLat},${wayLng}&travelmode=bicycling`;
-        
         if (mapsWindow) {
           mapsWindow.location.href = mapsUrl;
         } else {
@@ -265,17 +290,8 @@ export default function App() {
       const lat = parseFloat(data[0].lat);
       const lng = parseFloat(data[0].lon);
 
-      const radiusKm = dist * 0.4;
-      const randomHeading = Math.random() * 2 * Math.PI;
-      
-      const deltaLat = (radiusKm * Math.cos(randomHeading)) / 111.32;
-      const deltaLng = (radiusKm * Math.sin(randomHeading)) / (111.32 * Math.cos(lat * (Math.PI/180)));
+      const mapsUrl = buildLoopMapsUrl(lat, lng, dist);
 
-      const wayLat = lat + deltaLat;
-      const wayLng = lng + deltaLng;
-
-      const mapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${lat},${lng}&destination=${lat},${lng}&waypoints=${wayLat},${wayLng}&travelmode=bicycling`;
-      
       const mapsWindow = window.open(mapsUrl, '_blank');
       if (!mapsWindow) {
         setGeneratedMapsUrl(mapsUrl);

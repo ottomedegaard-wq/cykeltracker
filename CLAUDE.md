@@ -37,13 +37,15 @@ Google Maps route planner. Everything lives in `App.jsx`.
   Ride, Mud Warrior, Century 100+ km, Speedster > 30 km/h, Hat Trick 3 rides,
   Trailblazer mud ride, Grand Master level 10, …).
 - **Route planner:**
-  - GPS loop: turnaround point at `0.4 ×` the desired distance (road-curve
-    compensation) in a random heading. Opens Google Maps `travelmode=bicycling`
-    with origin = destination = the start point. The window is opened
+  - GPS loop: `buildLoopMapsUrl` places the start plus `LOOP_POINTS` (3) turn
+    points evenly on a circle through the start, in a random direction and
+    rotation, so the route is a real loop, not an out-and-back. The circle is
+    sized so straight-line length × `ROAD_FACTOR` (1.3) ≈ the desired distance.
+    Opens Google Maps `travelmode=bicycling` with origin = destination = start. The window is opened
     synchronously before the GPS call so pop-up blockers don't stop it, with a
     clickable-link fallback.
   - Address fallback: geocodes a typed start location via Nominatim, then
-    applies the same loop math.
+    uses the same `buildLoopMapsUrl`.
   - Manual planner: start, outbound waypoint, home waypoint → Google Maps.
 
 ## Checking changes
