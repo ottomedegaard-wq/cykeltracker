@@ -59,6 +59,11 @@ words). Keep replies short.
     Open-Meteo elevation API (free, no key, max 100 points per call). The app
     shows distance, climb, descent, highest point and an `ElevationChart`.
     Google Maps may choose slightly different roads.
+  - In-app map: `RouteMap` draws the loop on OpenStreetMap tiles
+    (tile.openstreetmap.org, plain `<img>` tiles + SVG route, no map library),
+    auto-zoomed to fit, with the required "© OpenStreetMap contributors" credit.
+    Touching the hill chart shows that spot on the map. The Google Maps button
+    stays for turn-by-turn navigation.
   - Manual planner: start, outbound waypoint, home waypoint → Google Maps.
 
 ## Checking changes

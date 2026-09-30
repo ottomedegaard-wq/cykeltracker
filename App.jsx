@@ -210,7 +210,7 @@ const fetchLoopElevation = async (points) => {
 
   // Scale sample distances to the route's own length.
   const scale = route.distance / 1000 / (samples[samples.length - 1].km || 1);
-  const profile = samples.map((p, i) => ({ km: p.km * scale, m: elevData.elevation[i] }));
+  const profile = samples.map((p, i) => ({ km: p.km * scale, m: elevData.elevation[i], lat: p.lat, lng: p.lng }));
 
   let climb = 0;
   let descent = 0;
@@ -223,6 +223,7 @@ const fetchLoopElevation = async (points) => {
   return {
     distanceKm: route.distance / 1000,
     profile,
+    line,
     climb: Math.round(climb),
     descent: Math.round(descent),
     high: Math.round(Math.max(...heights)),
@@ -230,9 +231,92 @@ const fetchLoopElevation = async (points) => {
   };
 };
 
+const MAP_W = 600; // map drawing size in pixels; it is scaled to fit the screen
+const MAP_H = 400;
+const TILE = 256;
+
+// Position on the OpenStreetMap "world picture" at zoom level z, in pixels.
+const worldPx = (p, z) => {
+  const n = TILE * 2 ** z;
+  const sin = Math.sin((p.lat * Math.PI) / 180);
+  return {
+    x: ((p.lng + 180) / 360) * n,
+    y: (0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI)) * n,
+  };
+};
+
+// Map of the loop drawn from OpenStreetMap tiles, with the route on top.
+// `marker` is an optional { lat, lng } to highlight (e.g. from the hill chart).
+function RouteMap({ line, marker }) {
+  // Pick the closest zoom where the whole route fits with some margin.
+  let zoom = 17;
+  while (zoom > 3) {
+    const pts = line.map((p) => worldPx(p, zoom));
+    const w = Math.max(...pts.map((p) => p.x)) - Math.min(...pts.map((p) => p.x));
+    const h = Math.max(...pts.map((p) => p.y)) - Math.min(...pts.map((p) => p.y));
+    if (w <= MAP_W * 0.85 && h <= MAP_H * 0.85) break;
+    zoom--;
+  }
+  const pts = line.map((p) => worldPx(p, zoom));
+  const cx = (Math.max(...pts.map((p) => p.x)) + Math.min(...pts.map((p) => p.x))) / 2;
+  const cy = (Math.max(...pts.map((p) => p.y)) + Math.min(...pts.map((p) => p.y))) / 2;
+  const left = cx - MAP_W / 2;
+  const top = cy - MAP_H / 2;
+  const toView = (p) => {
+    const w = worldPx(p, zoom);
+    return { x: w.x - left, y: w.y - top };
+  };
+
+  const tiles = [];
+  const maxTile = 2 ** zoom;
+  for (let tx = Math.floor(left / TILE); tx <= Math.floor((left + MAP_W) / TILE); tx++) {
+    for (let ty = Math.floor(top / TILE); ty <= Math.floor((top + MAP_H) / TILE); ty++) {
+      if (ty < 0 || ty >= maxTile) continue;
+      const wrappedX = ((tx % maxTile) + maxTile) % maxTile;
+      tiles.push({ key: `${tx}-${ty}`, src: `https://tile.openstreetmap.org/${zoom}/${wrappedX}/${ty}.png`, x: tx * TILE - left, y: ty * TILE - top });
+    }
+  }
+
+  const path = line.map((p, i) => {
+    const v = toView(p);
+    return `${i ? 'L' : 'M'}${v.x.toFixed(1)},${v.y.toFixed(1)}`;
+  }).join(' ');
+  const start = toView(line[0]);
+  const mark = marker ? toView(marker) : null;
+  const pct = (v, total) => `${(v / total) * 100}%`;
+
+  return (
+    <div className="relative w-full overflow-hidden rounded-lg border border-slate-800 bg-slate-800" style={{ aspectRatio: `${MAP_W} / ${MAP_H}` }}>
+      {tiles.map((tile) => (
+        <img
+          key={tile.key}
+          src={tile.src}
+          alt=""
+          draggable="false"
+          className="absolute max-w-none select-none"
+          style={{ left: pct(tile.x, MAP_W), top: pct(tile.y, MAP_H), width: pct(TILE, MAP_W), height: pct(TILE, MAP_H) }}
+        />
+      ))}
+      <svg viewBox={`0 0 ${MAP_W} ${MAP_H}`} className="absolute inset-0 w-full h-full pointer-events-none">
+        <path d={path} fill="none" stroke="#020617" strokeOpacity="0.5" strokeWidth="7" strokeLinejoin="round" strokeLinecap="round" />
+        <path d={path} fill="none" stroke="#10b981" strokeWidth="4" strokeLinejoin="round" strokeLinecap="round" />
+        <circle cx={start.x} cy={start.y} r="8" fill="#020617" stroke="#34d399" strokeWidth="3" />
+        {mark && <circle cx={mark.x} cy={mark.y} r="7" fill="#34d399" stroke="#020617" strokeWidth="3" />}
+      </svg>
+      <a
+        href="https://www.openstreetmap.org/copyright"
+        target="_blank"
+        rel="noreferrer"
+        className="absolute bottom-0 right-0 bg-white/80 text-slate-700 text-[9px] px-1.5 py-0.5 rounded-tl"
+      >
+        © OpenStreetMap contributors
+      </a>
+    </div>
+  );
+}
+
 // Height profile of the loop: green area chart, hover or drag to read a point.
-function ElevationChart({ profile, low, high }) {
-  const [hover, setHover] = useState(null);
+function ElevationChart({ profile, low, high, hover, setHover }) {
   const pad = Math.max(10, (50 - (high - low)) / 2); // keep flat routes looking flat
   const yMin = low - pad;
   const yMax = high + pad;
@@ -344,6 +428,7 @@ export default function App() {
   const [generatedMapsUrl, setGeneratedMapsUrl] = useState(null);
   const [elevation, setElevation] = useState(null); // null | { status: 'loading' | 'error' } | { status: 'ready', ...data }
   const elevationRequest = useRef(0);
+  const [routeHover, setRouteHover] = useState(null); // index into elevation.profile
 
   const formatDistNum = (kmVal) => Math.round(kmVal * 10) / 10;
   const formatDist = (kmVal) => `${formatDistNum(kmVal)} km`;
@@ -361,6 +446,7 @@ export default function App() {
   const loadElevation = async (points) => {
     const id = ++elevationRequest.current; // ignore answers for an older loop
     setElevation({ status: 'loading' });
+    setRouteHover(null);
     try {
       const data = await fetchLoopElevation(points);
       if (id === elevationRequest.current) setElevation({ status: 'ready', ...data });
@@ -1318,16 +1404,17 @@ export default function App() {
                 {elevation && (
                   <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
                     <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-emerald-400 font-mono">
-                      <Mountain className="w-4 h-4" /> Elevation
+                      <Mountain className="w-4 h-4" /> Your loop
                     </div>
                     {elevation.status === 'loading' && (
-                      <p className="text-xs text-slate-400">Loading hills for this loop...</p>
+                      <p className="text-xs text-slate-400">Loading map and hills for this loop...</p>
                     )}
                     {elevation.status === 'error' && (
-                      <p className="text-xs text-rose-300">Could not load elevation for this loop. The route in Google Maps still works.</p>
+                      <p className="text-xs text-rose-300">Could not load the map and hills for this loop. The route in Google Maps still works.</p>
                     )}
                     {elevation.status === 'ready' && (
                       <>
+                        <RouteMap line={elevation.line} marker={routeHover !== null ? elevation.profile[routeHover] : null} />
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 font-mono">
                           {[
                             ['Distance', `${formatDistNum(elevation.distanceKm)} km`],
@@ -1341,8 +1428,8 @@ export default function App() {
                             </div>
                           ))}
                         </div>
-                        <ElevationChart profile={elevation.profile} low={elevation.low} high={elevation.high} />
-                        <p className="text-[10px] text-slate-500">Based on a bike route from OpenStreetMap through the same points. Google may pick slightly different roads.</p>
+                        <ElevationChart profile={elevation.profile} low={elevation.low} high={elevation.high} hover={routeHover} setHover={setRouteHover} />
+                        <p className="text-[10px] text-slate-500">Bike route from OpenStreetMap. Touch the hill graph to see that spot on the map. Google Maps may pick slightly different roads.</p>
                       </>
                     )}
                   </div>
