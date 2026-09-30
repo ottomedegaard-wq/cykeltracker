@@ -210,6 +210,14 @@ export default function App() {
   const formatDistNum = (kmVal) => Math.round(kmVal * 10) / 10;
   const formatDist = (kmVal) => `${formatDistNum(kmVal)} km`;
 
+  // Shows an "Open route" button in the app and also tries to open Maps
+  // straight away. Phones often block tabs opened after a wait, so the
+  // button is the reliable way in.
+  const openLoopRoute = (mapsUrl) => {
+    setGeneratedMapsUrl(mapsUrl);
+    window.open(mapsUrl, '_blank');
+  };
+
   const handleGenerateGPSLoop = () => {
     const dist = parseFloat(plannerDesiredDistance);
     if (!dist || dist <= 0) return;
@@ -222,43 +230,28 @@ export default function App() {
       return;
     }
 
-    // Workaround for pop-up blockers: open the window synchronously, before waiting on async GPS.
-    const mapsWindow = window.open('', '_blank');
-    if (mapsWindow) {
-        mapsWindow.document.write('<div style="font-family:sans-serif; text-align:center; margin-top:50px;">Fetching location and calculating route...</div>');
-    }
-
+    // Ask for the location first, while this tab is still visible. Opening
+    // the Maps tab before this hid the browser's "Allow location?" prompt,
+    // so the lookup never finished.
     setIsFetchingGPS(true);
     navigator.geolocation.getCurrentPosition(
       (position) => {
         setIsFetchingGPS(false);
         const lat = position.coords.latitude;
         const lng = position.coords.longitude;
-
-        const mapsUrl = buildLoopMapsUrl(lat, lng, dist);
-
-        if (mapsWindow) {
-          mapsWindow.location.href = mapsUrl;
-        } else {
-          // Fallback if the browser blocked the original window
-          setGeneratedMapsUrl(mapsUrl);
-          setPlannerErrorMsg('Pop-up blocked. Click the link below.');
-        }
+        openLoopRoute(buildLoopMapsUrl(lat, lng, dist));
       },
       (error) => {
         setIsFetchingGPS(false);
-        if (mapsWindow) mapsWindow.close();
-        
         let errorText = t.locationError;
         if (error.code === 1) {
-            errorText = "GPS access denied. Check your browser settings.";
+          errorText = "Location access is blocked. Allow location for this site in your browser settings, or type a start location below.";
         } else if (error.code === 2 || error.code === 3) {
-            errorText = "Could not determine your exact location.";
+          errorText = "Could not find your location. Try again outside, or type a start location below.";
         }
-        
         setPlannerErrorMsg(errorText);
       },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 60000 }
     );
   };
 
@@ -292,11 +285,7 @@ export default function App() {
 
       const mapsUrl = buildLoopMapsUrl(lat, lng, dist);
 
-      const mapsWindow = window.open(mapsUrl, '_blank');
-      if (!mapsWindow) {
-        setGeneratedMapsUrl(mapsUrl);
-        setPlannerErrorMsg('Pop-up blocked. Click link below.');
-      }
+      openLoopRoute(mapsUrl);
       setIsFetchingAddress(false);
 
     } catch (err) {
@@ -1159,17 +1148,22 @@ export default function App() {
                   </button>
                 </div>
 
+                {generatedMapsUrl && (
+                  <a
+                    href={generatedMapsUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 py-3.5 px-4 rounded-xl font-black text-sm transition-all active:scale-95 shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2"
+                  >
+                    <Navigation className="w-4 h-4" />
+                    <span>Open route in Google Maps</span>
+                  </a>
+                )}
+
                 {plannerErrorMsg && (
-                  <div className={`border p-3 rounded-xl flex flex-col gap-2 mt-4 ${generatedMapsUrl ? 'bg-amber-500/15 border-amber-500/40 text-amber-200' : 'bg-rose-500/15 border-rose-500/40 text-rose-200'}`}>
-                    <div className="flex items-start gap-2.5">
-                      <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5" />
-                      <p className="text-xs leading-relaxed font-medium">{plannerErrorMsg}</p>
-                    </div>
-                    {generatedMapsUrl && (
-                      <a href={generatedMapsUrl} target="_blank" rel="noreferrer" className="text-xs font-bold underline px-6 hover:text-amber-100">
-                        Open Google Maps Route
-                      </a>
-                    )}
+                  <div className="border p-3 rounded-xl flex items-start gap-2.5 mt-4 bg-rose-500/15 border-rose-500/40 text-rose-200">
+                    <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5" />
+                    <p className="text-xs leading-relaxed font-medium">{plannerErrorMsg}</p>
                   </div>
                 )}
               </div>

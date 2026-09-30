@@ -47,9 +47,10 @@ words). Keep replies short.
     points evenly on a circle through the start, in a random direction and
     rotation, so the route is a real loop, not an out-and-back. The circle is
     sized so straight-line length × `ROAD_FACTOR` (1.3) ≈ the desired distance.
-    Opens Google Maps `travelmode=bicycling` with origin = destination = start. The window is opened
-    synchronously before the GPS call so pop-up blockers don't stop it, with a
-    clickable-link fallback.
+    Opens Google Maps `travelmode=bicycling` with origin = destination = start. Location is asked for
+    first, on the visible app tab (opening a tab first hid the permission prompt
+    and the lookup hung). Then `openLoopRoute` shows an "Open route in Google
+    Maps" button and also tries `window.open`, which phones may block.
   - Address fallback: geocodes a typed start location via Nominatim, then
     uses the same `buildLoopMapsUrl`.
   - Manual planner: start, outbound waypoint, home waypoint → Google Maps.
