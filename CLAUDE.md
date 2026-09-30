@@ -12,27 +12,26 @@ Google Maps route planner. Everything lives in `App.jsx`.
 - **Design system.** Dark theme (`bg-slate-950`, `bg-slate-900`,
   `text-slate-100`) with `emerald-500` / `emerald-400` accents. Tailwind utility
   classes only.
-- **Five languages.** `da`, `en`, `de`, `fr`, `es` via the `TRANSLATIONS`
-  object. Every user-visible string goes into `TRANSLATIONS` for all five
-  languages, with identical key sets (including `badges.*`). Don't add new
-  inline `lang === 'da' ? … : …` ternaries.
-- **Units.** All state is stored in **km**. Convert only at the edges: input
-  (`mi` → km via `KM_TO_MILES`) and display (`formatDist` / `formatDistNum`).
-  The km/mi toggle must update every displayed distance and limit.
+- **English only, km only.** No language picker and no mi toggle. Reusable
+  UI labels live in the `TEXT` object (aliased as `t` in the component);
+  one-off messages can be inline English. All distances are km; display via
+  `formatDist` / `formatDistNum` (rounded to 1 decimal).
+- **No persistence yet.** State is in-memory `useState` only; storage is a
+  planned later step.
 
 ## Features to preserve
 
 - **Component wear** (chain, tires, gears, disc brakes):
-  `calculateEffectiveWear` scales ride distance by weather (`Tørt`/`Regn`) ×
-  terrain (`Asfalt`/`Grus`/`Mudder`) multipliers (up to 4× for chain in rain +
+  `calculateEffectiveWear` scales ride distance by weather (`dry`/`rain`) ×
+  terrain (`asphalt`/`gravel`/`mud`) multipliers (up to 4× for chain in rain +
   mud). Limits: `MAX_*_KM`. Resetting a component gives XP (chain +100,
   tires +200, gears +300, brakes +150) only when km since last service ≥
   `MIN_*_XP_KM`; otherwise it resets without XP.
 - **XP / levels:** 1 XP per km ridden, `XP_PER_LEVEL = 500`. Deleting a ride
   reverses its stats and XP.
 - **16 trophies** in `badgesList`, unlocked automatically from history (First
-  Ride, Mud Warrior, Century 100+ km, Speedster > 30 km/h, Grand Master level
-  10, …).
+  Ride, Mud Warrior, Century 100+ km, Speedster > 30 km/h, Hat Trick 3 rides,
+  Trailblazer mud ride, Grand Master level 10, …).
 - **Route planner:**
   - GPS loop: turnaround point at `0.4 ×` the desired distance (road-curve
     compensation) in a random heading. Opens Google Maps `travelmode=bicycling`
