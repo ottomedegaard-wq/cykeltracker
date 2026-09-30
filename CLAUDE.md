@@ -8,7 +8,11 @@ Google Maps route planner. Everything lives in `App.jsx`.
 - **Single file.** All logic, components, translations and UI stay in `App.jsx`
   (default-exported `App`). It runs in StackBlitz/CodeSandbox with no build
   setup, so the only imports allowed are `react` and `lucide-react`. No extra
-  files, no new dependencies.
+  files, no new dependencies. The one exception is `index.html`, a static
+  loader for GitHub Pages: it fetches `App.jsx`, compiles the JSX in the
+  browser (Babel standalone), resolves `react`/`lucide-react` via an import map
+  to esm.sh, and mounts `<App />`. If you add an import to `App.jsx`, add it to
+  the import map too.
 - **Design system.** Dark theme (`bg-slate-950`, `bg-slate-900`,
   `text-slate-100`) with `emerald-500` / `emerald-400` accents. Tailwind utility
   classes only.
