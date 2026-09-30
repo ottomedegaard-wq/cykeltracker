@@ -3,6 +3,12 @@
 Bike tracker web app: ride logging, XP/levels, trophies, component wear, and a
 Google Maps route planner. Everything lives in `App.jsx`.
 
+## Talking to the owner
+
+The owner is brand new to coding. Explain things like you would to a
+15-year-old: short sentences, simple words, no jargon (or explain it in a few
+words). Keep replies short.
+
 ## Ground rules (do not break)
 
 - **Single file.** All logic, components, translations and UI stay in `App.jsx`
