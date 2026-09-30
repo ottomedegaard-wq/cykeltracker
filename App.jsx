@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { 
   Settings, 
   Droplets, 
@@ -122,7 +122,7 @@ const LOOP_POINTS = 3;
 // Builds a Google Maps cycling route that leaves and returns to the start as a
 // real loop. The start and LOOP_POINTS turn points sit evenly on a circle that
 // passes through the start, so you ride out one way and come home another.
-const buildLoopMapsUrl = (lat, lng, distKm) => {
+const buildLoopPoints = (lat, lng, distKm) => {
   const corners = LOOP_POINTS + 1;
   // Perimeter of a regular polygon inscribed in a circle of radius r is
   // 2 * n * r * sin(PI / n). Solve for r so the road distance matches distKm.
@@ -149,11 +149,147 @@ const buildLoopMapsUrl = (lat, lng, distKm) => {
     });
   }
 
+  const start = { lat, lng };
+  return [start, ...waypoints, start];
+};
+
+// Google Maps cycling directions through the loop points (first = last = start).
+const loopMapsUrl = (points) => {
   const fmt = (p) => `${p.lat.toFixed(5)},${p.lng.toFixed(5)}`;
-  const start = fmt({ lat, lng });
-  const via = waypoints.map(fmt).join('|');
+  const start = fmt(points[0]);
+  const via = points.slice(1, -1).map(fmt).join('|');
   return `https://www.google.com/maps/dir/?api=1&origin=${start}&destination=${start}&waypoints=${encodeURIComponent(via)}&travelmode=bicycling`;
 };
+
+const haversineKm = (a, b) => {
+  const r = Math.PI / 180;
+  const dLat = (b.lat - a.lat) * r;
+  const dLng = (b.lng - a.lng) * r;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dLng / 2) ** 2;
+  return 2 * 6371 * Math.asin(Math.sqrt(h));
+};
+
+// Picks `count` points spread evenly (by distance) along a line of points.
+const sampleAlongLine = (line, count) => {
+  const cum = [0];
+  for (let i = 1; i < line.length; i++) cum.push(cum[i - 1] + haversineKm(line[i - 1], line[i]));
+  const total = cum[cum.length - 1];
+  const samples = [];
+  let seg = 1;
+  for (let i = 0; i < count; i++) {
+    const km = (total * i) / (count - 1);
+    while (seg < line.length - 1 && cum[seg] < km) seg++;
+    const a = line[seg - 1];
+    const b = line[seg];
+    const len = cum[seg] - cum[seg - 1];
+    const f = len > 0 ? Math.min(1, Math.max(0, (km - cum[seg - 1]) / len)) : 0;
+    samples.push({ km, lat: a.lat + (b.lat - a.lat) * f, lng: a.lng + (b.lng - a.lng) * f });
+  }
+  return samples;
+};
+
+const ELEVATION_SAMPLES = 100; // Open-Meteo allows up to 100 points per request
+
+// Gets the real bike route along the roads (OpenStreetMap routing), then the
+// height above sea level at 100 points along it (Open-Meteo). Both are free
+// and need no API key.
+const fetchLoopElevation = async (points) => {
+  const coords = points.map((p) => `${p.lng.toFixed(5)},${p.lat.toFixed(5)}`).join(';');
+  const routeRes = await fetch(`https://routing.openstreetmap.de/routed-bike/route/v1/driving/${coords}?overview=full&geometries=geojson`);
+  const routeData = await routeRes.json();
+  if (routeData.code !== 'Ok' || !routeData.routes?.length) throw new Error('No bike route found');
+  const route = routeData.routes[0];
+  const line = route.geometry.coordinates.map(([lng, lat]) => ({ lat, lng }));
+
+  const samples = sampleAlongLine(line, ELEVATION_SAMPLES);
+  const lats = samples.map((p) => p.lat.toFixed(5)).join(',');
+  const lngs = samples.map((p) => p.lng.toFixed(5)).join(',');
+  const elevRes = await fetch(`https://api.open-meteo.com/v1/elevation?latitude=${lats}&longitude=${lngs}`);
+  const elevData = await elevRes.json();
+  if (!Array.isArray(elevData.elevation)) throw new Error('No elevation data');
+
+  // Scale sample distances to the route's own length.
+  const scale = route.distance / 1000 / (samples[samples.length - 1].km || 1);
+  const profile = samples.map((p, i) => ({ km: p.km * scale, m: elevData.elevation[i] }));
+
+  let climb = 0;
+  let descent = 0;
+  for (let i = 1; i < profile.length; i++) {
+    const diff = profile[i].m - profile[i - 1].m;
+    if (diff > 0) climb += diff;
+    else descent -= diff;
+  }
+  const heights = profile.map((p) => p.m);
+  return {
+    distanceKm: route.distance / 1000,
+    profile,
+    climb: Math.round(climb),
+    descent: Math.round(descent),
+    high: Math.round(Math.max(...heights)),
+    low: Math.round(Math.min(...heights)),
+  };
+};
+
+// Height profile of the loop: green area chart, hover or drag to read a point.
+function ElevationChart({ profile, low, high }) {
+  const [hover, setHover] = useState(null);
+  const pad = Math.max(10, (50 - (high - low)) / 2); // keep flat routes looking flat
+  const yMin = low - pad;
+  const yMax = high + pad;
+  const total = profile[profile.length - 1].km || 1;
+  const x = (km) => (km / total) * 100;
+  const y = (m) => 100 - ((m - yMin) / (yMax - yMin)) * 100;
+  const line = profile.map((p, i) => `${i ? 'L' : 'M'}${x(p.km).toFixed(2)},${y(p.m).toFixed(2)}`).join(' ');
+  const area = `${line} L100,100 L0,100 Z`;
+
+  const onMove = (e) => {
+    const box = e.currentTarget.getBoundingClientRect();
+    const f = Math.min(1, Math.max(0, (e.clientX - box.left) / box.width));
+    setHover(Math.round(f * (profile.length - 1)));
+  };
+  const h = hover !== null ? profile[hover] : null;
+
+  return (
+    <div className="space-y-1">
+      <div className="flex justify-between text-[10px] font-mono text-slate-500">
+        <span>High {high} m</span>
+        <span>Low {low} m</span>
+      </div>
+      <div
+        className="relative h-28 touch-none cursor-crosshair"
+        onPointerMove={onMove}
+        onPointerDown={onMove}
+        onPointerLeave={() => setHover(null)}
+      >
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 w-full h-full">
+          <line x1="0" x2="100" y1={y(high)} y2={y(high)} stroke="currentColor" className="text-slate-800" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+          <line x1="0" x2="100" y1={y(low)} y2={y(low)} stroke="currentColor" className="text-slate-800" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+          <path d={area} className="fill-emerald-500/20" />
+          <path d={line} fill="none" stroke="currentColor" className="text-emerald-400" strokeWidth="2" vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
+        </svg>
+        {h && (
+          <>
+            <div className="absolute top-0 bottom-0 w-px bg-slate-400/60 pointer-events-none" style={{ left: `${x(h.km)}%` }} />
+            <div
+              className="absolute w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-slate-950 -translate-x-1/2 -translate-y-1/2 pointer-events-none"
+              style={{ left: `${x(h.km)}%`, top: `${y(h.m)}%` }}
+            />
+            <div
+              className="absolute -top-7 px-2 py-0.5 rounded-lg bg-slate-800 border border-slate-700 text-[11px] font-mono text-slate-100 whitespace-nowrap pointer-events-none -translate-x-1/2"
+              style={{ left: `${Math.min(85, Math.max(15, x(h.km)))}%` }}
+            >
+              {h.km.toFixed(1)} km · {Math.round(h.m)} m
+            </div>
+          </>
+        )}
+      </div>
+      <div className="flex justify-between text-[10px] font-mono text-slate-500">
+        <span>0 km</span>
+        <span>{total.toFixed(1)} km</span>
+      </div>
+    </div>
+  );
+}
 
 export default function App() {
   const t = TEXT;
@@ -206,6 +342,8 @@ export default function App() {
   const [isFetchingAddress, setIsFetchingAddress] = useState(false);
   const [plannerErrorMsg, setPlannerErrorMsg] = useState(null);
   const [generatedMapsUrl, setGeneratedMapsUrl] = useState(null);
+  const [elevation, setElevation] = useState(null); // null | { status: 'loading' | 'error' } | { status: 'ready', ...data }
+  const elevationRequest = useRef(0);
 
   const formatDistNum = (kmVal) => Math.round(kmVal * 10) / 10;
   const formatDist = (kmVal) => `${formatDistNum(kmVal)} km`;
@@ -213,9 +351,28 @@ export default function App() {
   // Shows an "Open route" button in the app and also tries to open Maps
   // straight away. Phones often block tabs opened after a wait, so the
   // button is the reliable way in.
-  const openLoopRoute = (mapsUrl) => {
+  const openLoopRoute = (points) => {
+    const mapsUrl = loopMapsUrl(points);
     setGeneratedMapsUrl(mapsUrl);
     window.open(mapsUrl, '_blank');
+    loadElevation(points);
+  };
+
+  const loadElevation = async (points) => {
+    const id = ++elevationRequest.current; // ignore answers for an older loop
+    setElevation({ status: 'loading' });
+    try {
+      const data = await fetchLoopElevation(points);
+      if (id === elevationRequest.current) setElevation({ status: 'ready', ...data });
+    } catch (err) {
+      if (id === elevationRequest.current) setElevation({ status: 'error' });
+    }
+  };
+
+  const clearLoop = () => {
+    elevationRequest.current++;
+    setGeneratedMapsUrl(null);
+    setElevation(null);
   };
 
   const handleGenerateGPSLoop = () => {
@@ -223,7 +380,7 @@ export default function App() {
     if (!dist || dist <= 0) return;
 
     setPlannerErrorMsg(null);
-    setGeneratedMapsUrl(null);
+    clearLoop();
 
     if (!navigator.geolocation) {
       setPlannerErrorMsg(t.gpsNotSupported);
@@ -239,7 +396,7 @@ export default function App() {
         setIsFetchingGPS(false);
         const lat = position.coords.latitude;
         const lng = position.coords.longitude;
-        openLoopRoute(buildLoopMapsUrl(lat, lng, dist));
+        openLoopRoute(buildLoopPoints(lat, lng, dist));
       },
       (error) => {
         setIsFetchingGPS(false);
@@ -267,7 +424,7 @@ export default function App() {
     }
 
     setPlannerErrorMsg(null);
-    setGeneratedMapsUrl(null);
+    clearLoop();
     setIsFetchingAddress(true);
 
     try {
@@ -283,9 +440,7 @@ export default function App() {
       const lat = parseFloat(data[0].lat);
       const lng = parseFloat(data[0].lon);
 
-      const mapsUrl = buildLoopMapsUrl(lat, lng, dist);
-
-      openLoopRoute(mapsUrl);
+      openLoopRoute(buildLoopPoints(lat, lng, dist));
       setIsFetchingAddress(false);
 
     } catch (err) {
@@ -1108,7 +1263,7 @@ export default function App() {
                     type="number"
                     step="any"
                     value={plannerDesiredDistance}
-                    onChange={(e) => { setPlannerDesiredDistance(e.target.value); setPlannerErrorMsg(null); setGeneratedMapsUrl(null); }}
+                    onChange={(e) => { setPlannerDesiredDistance(e.target.value); setPlannerErrorMsg(null); clearLoop(); }}
                     placeholder={t.desiredDistancePlaceholder}
                     className="w-full bg-slate-950 border border-emerald-500/30 rounded-xl px-4 py-3 text-emerald-100 text-sm font-semibold focus:outline-none focus:border-emerald-500 font-mono placeholder:text-slate-600 shadow-inner"
                     min="1"
@@ -1158,6 +1313,39 @@ export default function App() {
                     <Navigation className="w-4 h-4" />
                     <span>Open route in Google Maps</span>
                   </a>
+                )}
+
+                {elevation && (
+                  <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+                    <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-emerald-400 font-mono">
+                      <Mountain className="w-4 h-4" /> Elevation
+                    </div>
+                    {elevation.status === 'loading' && (
+                      <p className="text-xs text-slate-400">Loading hills for this loop...</p>
+                    )}
+                    {elevation.status === 'error' && (
+                      <p className="text-xs text-rose-300">Could not load elevation for this loop. The route in Google Maps still works.</p>
+                    )}
+                    {elevation.status === 'ready' && (
+                      <>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 font-mono">
+                          {[
+                            ['Distance', `${formatDistNum(elevation.distanceKm)} km`],
+                            ['Climb', `↑ ${elevation.climb} m`],
+                            ['Descent', `↓ ${elevation.descent} m`],
+                            ['Highest', `${elevation.high} m`],
+                          ].map(([label, value]) => (
+                            <div key={label} className="bg-slate-900 rounded-lg p-2 border border-slate-800/60 min-w-0">
+                              <div className="text-[9px] uppercase tracking-wider text-slate-500">{label}</div>
+                              <div className="text-[11px] font-bold text-slate-100 whitespace-nowrap">{value}</div>
+                            </div>
+                          ))}
+                        </div>
+                        <ElevationChart profile={elevation.profile} low={elevation.low} high={elevation.high} />
+                        <p className="text-[10px] text-slate-500">Based on a bike route from OpenStreetMap through the same points. Google may pick slightly different roads.</p>
+                      </>
+                    )}
+                  </div>
                 )}
 
                 {plannerErrorMsg && (

@@ -43,7 +43,7 @@ words). Keep replies short.
   Ride, Mud Warrior, Century 100+ km, Speedster > 30 km/h, Hat Trick 3 rides,
   Trailblazer mud ride, Grand Master level 10, …).
 - **Route planner:**
-  - GPS loop: `buildLoopMapsUrl` places the start plus `LOOP_POINTS` (3) turn
+  - GPS loop: `buildLoopPoints` places the start plus `LOOP_POINTS` (3) turn
     points evenly on a circle through the start, in a random direction and
     rotation, so the route is a real loop, not an out-and-back. The circle is
     sized so straight-line length × `ROAD_FACTOR` (1.3) ≈ the desired distance.
@@ -52,7 +52,13 @@ words). Keep replies short.
     and the lookup hung). Then `openLoopRoute` shows an "Open route in Google
     Maps" button and also tries `window.open`, which phones may block.
   - Address fallback: geocodes a typed start location via Nominatim, then
-    uses the same `buildLoopMapsUrl`.
+    uses the same `buildLoopPoints`.
+  - Elevation: after a loop is made, `fetchLoopElevation` gets the real bike
+    route through the same points from OSRM (routing.openstreetmap.de,
+    `routed-bike`), samples 100 points along it, and gets heights from the
+    Open-Meteo elevation API (free, no key, max 100 points per call). The app
+    shows distance, climb, descent, highest point and an `ElevationChart`.
+    Google Maps may choose slightly different roads.
   - Manual planner: start, outbound waypoint, home waypoint → Google Maps.
 
 ## Checking changes
