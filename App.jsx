@@ -779,7 +779,7 @@ function Tracker({ saved = {}, onDataChange, account }) {
     const here = { lat: latitude, lng: longitude };
     setTrip((prev) => {
       if (!prev || prev.status !== 'riding') return prev;
-      const next = { ...prev, you: here, gpsError: null };
+      const next = { ...prev, you: here, gpsError: null, accuracy: Math.round(accuracy) };
       // Ignore very rough fixes so GPS jumps don't add fake km.
       if (accuracy > 35) return next;
       const last = prev.track[prev.track.length - 1];
@@ -829,6 +829,7 @@ function Tracker({ saved = {}, onDataChange, account }) {
       lastFixAt: null,
       you: null,
       gpsError: null,
+      accuracy: null,
     });
     watchId.current = navigator.geolocation.watchPosition(onTripPosition, onTripGpsError, {
       enableHighAccuracy: true,
@@ -1021,7 +1022,17 @@ function Tracker({ saved = {}, onDataChange, account }) {
                 {riding ? 'Trip in progress' : 'Trip finished'}
               </h1>
             </div>
-            <span className="text-2xl font-black font-mono text-emerald-400 tabular-nums">{formatClock(elapsedMs)}</span>
+            {riding ? (
+              <span className="text-2xl font-black font-mono text-emerald-400 tabular-nums">{formatClock(elapsedMs)}</span>
+            ) : (
+              <button
+                type="button"
+                onClick={closeTrip}
+                className="text-xs font-bold text-slate-300 bg-slate-900 border border-slate-800 hover:border-slate-700 px-3 py-2 rounded-xl"
+              >
+                ✕ Close
+              </button>
+            )}
           </header>
 
           <RouteMap line={route.line} track={trip.track} you={riding ? trip.you : null} />
@@ -1037,9 +1048,11 @@ function Tracker({ saved = {}, onDataChange, account }) {
 
           {riding && (
             <>
-              {(trip.gpsError || !trip.you) && (
+              {(trip.gpsError || !trip.you || trip.accuracy > 35) && (
                 <p className="text-xs rounded-xl p-3 border bg-amber-500/10 border-amber-500/30 text-amber-200">
-                  {trip.gpsError || 'Looking for GPS signal...'}
+                  {trip.gpsError
+                    || (!trip.you ? 'Looking for GPS signal...'
+                    : `GPS is not exact enough yet (about ${trip.accuracy} m off). Km only count when it is under 35 m. Go outside and use your phone.`)}
                 </p>
               )}
               <div className="bg-slate-900 border border-slate-800 rounded-xl p-3">
@@ -1067,6 +1080,8 @@ function Tracker({ saved = {}, onDataChange, account }) {
 
           {!riding && (
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-4">
+              {canSave && (
+              <>
               <div className="space-y-2">
                 <div className="text-xs font-semibold uppercase tracking-wider text-slate-400 font-mono">{t.weatherLabel}</div>
                 <div className="flex gap-2">
@@ -1082,6 +1097,8 @@ function Tracker({ saved = {}, onDataChange, account }) {
                   {choice('mud', tripTerrain, setTripTerrain, `🤎 ${t.mud}`)}
                 </div>
               </div>
+              </>
+              )}
               {canSave ? (
                 <button
                   type="button"
@@ -1093,8 +1110,12 @@ function Tracker({ saved = {}, onDataChange, account }) {
               ) : (
                 <p className="text-xs text-slate-400">This trip was too short to save (under 0.1 km).</p>
               )}
-              <button type="button" onClick={closeTrip} className="w-full text-xs text-slate-400 hover:text-rose-300 py-1">
-                Don't save
+              <button
+                type="button"
+                onClick={closeTrip}
+                className="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 py-3 rounded-xl font-bold text-sm transition-all active:scale-95"
+              >
+                {canSave ? "Don't save, go back" : 'Go back to the app'}
               </button>
             </div>
           )}
