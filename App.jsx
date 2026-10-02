@@ -21,7 +21,9 @@ import {
   Gauge,
   Flame,
   LogOut,
-  Cloud
+  Cloud,
+  Play,
+  Flag
 } from 'lucide-react';
 
 const TEXT = {
@@ -250,17 +252,18 @@ const worldPx = (p, z) => {
 
 // Map of the loop drawn from OpenStreetMap tiles, with the route on top.
 // `marker` is an optional { lat, lng } to highlight (e.g. from the hill chart).
-function RouteMap({ line, marker }) {
-  // Pick the closest zoom where the whole route fits with some margin.
+function RouteMap({ line, marker, track, you }) {
+  // Pick the closest zoom where the whole route (and you) fits with some margin.
+  const fitPoints = you ? [...line, you] : line;
   let zoom = 17;
   while (zoom > 3) {
-    const pts = line.map((p) => worldPx(p, zoom));
+    const pts = fitPoints.map((p) => worldPx(p, zoom));
     const w = Math.max(...pts.map((p) => p.x)) - Math.min(...pts.map((p) => p.x));
     const h = Math.max(...pts.map((p) => p.y)) - Math.min(...pts.map((p) => p.y));
     if (w <= MAP_W * 0.85 && h <= MAP_H * 0.85) break;
     zoom--;
   }
-  const pts = line.map((p) => worldPx(p, zoom));
+  const pts = fitPoints.map((p) => worldPx(p, zoom));
   const cx = (Math.max(...pts.map((p) => p.x)) + Math.min(...pts.map((p) => p.x))) / 2;
   const cy = (Math.max(...pts.map((p) => p.y)) + Math.min(...pts.map((p) => p.y))) / 2;
   const left = cx - MAP_W / 2;
@@ -280,10 +283,13 @@ function RouteMap({ line, marker }) {
     }
   }
 
-  const path = line.map((p, i) => {
+  const toPath = (pointsList) => pointsList.map((p, i) => {
     const v = toView(p);
     return `${i ? 'L' : 'M'}${v.x.toFixed(1)},${v.y.toFixed(1)}`;
   }).join(' ');
+  const path = toPath(line);
+  const trackPath = track && track.length > 1 ? toPath(track) : null;
+  const youView = you ? toView(you) : null;
   const start = toView(line[0]);
   const mark = marker ? toView(marker) : null;
   const pct = (v, total) => `${(v / total) * 100}%`;
@@ -305,6 +311,13 @@ function RouteMap({ line, marker }) {
         <path d={path} fill="none" stroke="#10b981" strokeWidth="4" strokeLinejoin="round" strokeLinecap="round" />
         <circle cx={start.x} cy={start.y} r="8" fill="#020617" stroke="#34d399" strokeWidth="3" />
         {mark && <circle cx={mark.x} cy={mark.y} r="7" fill="#34d399" stroke="#020617" strokeWidth="3" />}
+        {trackPath && <path d={trackPath} fill="none" stroke="#fbbf24" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />}
+        {youView && (
+          <>
+            <circle cx={youView.x} cy={youView.y} r="16" fill="#38bdf8" fillOpacity="0.25" />
+            <circle cx={youView.x} cy={youView.y} r="8" fill="#38bdf8" stroke="#f8fafc" strokeWidth="3" />
+          </>
+        )}
       </svg>
       <a
         href="https://www.openstreetmap.org/copyright"
@@ -584,41 +597,34 @@ function Tracker({ saved = {}, onDataChange, account }) {
     };
   };
 
-  const handleAddRide = (e) => {
-    e.preventDefault();
-    const distNumKm = Number(distance);
-    if (!distNumKm || distNumKm <= 0) return;
-
-    const hours = Math.min(24, Math.max(0, parseInt(durationHours) || 0));
-    const minutes = Math.min(59, Math.max(0, parseInt(durationMinutes) || 0));
-    const totalMinutes = hours * 60 + minutes;
-
-    const { chainKm, tireKm, gearKm, brakeKm } = calculateEffectiveWear(distNumKm, weather, terrain);
+  // Adds a finished ride: wear on each part, totals, XP and the history list.
+  const logRide = ({ distKm, minutes, weather: w, terrain: tr }) => {
+    const { chainKm, tireKm, gearKm, brakeKm } = calculateEffectiveWear(distKm, w, tr);
 
     setTotalChainKm(prev => prev + chainKm);
     setTotalTireKm(prev => prev + tireKm);
     setTotalGearKm(prev => prev + gearKm);
     setTotalBrakeKm(prev => prev + brakeKm);
-    setTotalDistanceRidden(prev => prev + distNumKm);
-    setTotalTimeMinutes(prev => prev + totalMinutes);
-    setKmSinceLastClean(prev => prev + distNumKm);
-    setKmSinceLastTireChange(prev => prev + distNumKm);
-    setKmSinceLastGearChange(prev => prev + distNumKm);
-    setKmSinceLastBrakeCheck(prev => prev + distNumKm);
+    setTotalDistanceRidden(prev => prev + distKm);
+    setTotalTimeMinutes(prev => prev + minutes);
+    setKmSinceLastClean(prev => prev + distKm);
+    setKmSinceLastTireChange(prev => prev + distKm);
+    setKmSinceLastGearChange(prev => prev + distKm);
+    setKmSinceLastBrakeCheck(prev => prev + distKm);
 
-    if (weather === 'rain') {
+    if (w === 'rain') {
       setRainRidesCount(prev => prev + 1);
     }
 
-    const earnedXp = Math.round(distNumKm);
+    const earnedXp = Math.round(distKm);
     setXp(prev => prev + earnedXp);
 
     const newRide = {
       id: Date.now(),
-      distance: distNumKm,
-      durationMinutes: totalMinutes,
-      weather,
-      terrain,
+      distance: distKm,
+      durationMinutes: minutes,
+      weather: w,
+      terrain: tr,
       chainKm,
       tireKm,
       gearKm,
@@ -626,13 +632,23 @@ function Tracker({ saved = {}, onDataChange, account }) {
       earnedXp,
       date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
     };
-    
-    setRideHistory([newRide, ...rideHistory]);
+
+    setRideHistory(prev => [newRide, ...prev]);
+  };
+
+  const handleAddRide = (e) => {
+    e.preventDefault();
+    const distNumKm = Number(distance);
+    if (!distNumKm || distNumKm <= 0) return;
+
+    const hours = Math.min(24, Math.max(0, parseInt(durationHours) || 0));
+    const minutes = Math.min(59, Math.max(0, parseInt(durationMinutes) || 0));
+
+    logRide({ distKm: distNumKm, minutes: hours * 60 + minutes, weather, terrain });
     setDistance("");
     setDurationHours("");
     setDurationMinutes("");
   };
-
   const handleDeleteRide = (id) => {
     const rideToDelete = rideHistory.find(r => r.id === id);
     if (!rideToDelete) return;
@@ -718,6 +734,137 @@ function Tracker({ saved = {}, onDataChange, account }) {
     onDataChange?.({ profileName, totalChainKm, totalTireKm, totalGearKm, totalBrakeKm, totalDistanceRidden, totalTimeMinutes, rainRidesCount, chainCleanCount, tireChangeCount, gearChangeCount, brakeCheckCount, kmSinceLastClean, kmSinceLastTireChange, kmSinceLastGearChange, kmSinceLastBrakeCheck, rideHistory, xp });
   }, [profileName, totalChainKm, totalTireKm, totalGearKm, totalBrakeKm, totalDistanceRidden, totalTimeMinutes, rainRidesCount, chainCleanCount, tireChangeCount, gearChangeCount, brakeCheckCount, kmSinceLastClean, kmSinceLastTireChange, kmSinceLastGearChange, kmSinceLastBrakeCheck, rideHistory, xp]);
 
+  // ----- Live trip: follow GPS along a planned route, then save it as a ride.
+  // trip: null | { route, status: 'riding' | 'done', startedAt, endedAt,
+  //   track: [{lat,lng}], distanceKm, speedKmh, progressIdx, you, gpsError }
+  const [trip, setTrip] = useState(null);
+  const [tripWeather, setTripWeather] = useState('dry');
+  const [tripTerrain, setTripTerrain] = useState('asphalt');
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const [, setClockTick] = useState(0);
+  const watchId = useRef(null);
+  const wakeLock = useRef(null);
+
+  const stopWatching = () => {
+    if (watchId.current !== null) navigator.geolocation.clearWatch(watchId.current);
+    watchId.current = null;
+    wakeLock.current?.release?.().catch(() => {});
+    wakeLock.current = null;
+  };
+
+  // Keeps the screen on during a trip (GPS stops when the screen turns off).
+  const keepScreenOn = async () => {
+    try {
+      wakeLock.current = await navigator.wakeLock?.request('screen');
+    } catch {
+      // Not supported or refused: the rider has to keep the screen on.
+    }
+  };
+
+  useEffect(() => {
+    if (trip?.status !== 'riding') return;
+    const timer = setInterval(() => setClockTick((n) => n + 1), 1000);
+    const onVisible = () => { if (document.visibilityState === 'visible') keepScreenOn(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [trip?.status]);
+
+  useEffect(() => stopWatching, []);
+
+  const onTripPosition = (position) => {
+    const { latitude, longitude, accuracy, speed } = position.coords;
+    const here = { lat: latitude, lng: longitude };
+    setTrip((prev) => {
+      if (!prev || prev.status !== 'riding') return prev;
+      const next = { ...prev, you: here, gpsError: null };
+      // Ignore very rough fixes so GPS jumps don't add fake km.
+      if (accuracy > 35) return next;
+      const last = prev.track[prev.track.length - 1];
+      const stepKm = last ? haversineKm(last, here) : 0;
+      if (last && stepKm < 0.008) return next; // standing still / GPS wobble
+      if (last) {
+        const hours = (position.timestamp - prev.lastFixAt) / 3600000;
+        const stepKmh = hours > 0 ? stepKm / hours : Infinity;
+        if (stepKmh > 90) return next; // a GPS jump, not real riding
+        next.distanceKm = prev.distanceKm + stepKm;
+        next.speedKmh = speed !== null && speed >= 0 ? speed * 3.6 : stepKmh;
+      }
+      next.track = [...prev.track, here];
+      next.lastFixAt = position.timestamp;
+      // How far along the route: closest route point a bit ahead of the last one.
+      const profile = prev.route.profile;
+      let best = prev.progressIdx;
+      let bestKm = Infinity;
+      for (let i = Math.max(0, prev.progressIdx - 3); i <= Math.min(profile.length - 1, prev.progressIdx + 15); i++) {
+        const d = haversineKm(profile[i], here);
+        if (d < bestKm) { bestKm = d; best = i; }
+      }
+      next.progressIdx = best;
+      return next;
+    });
+  };
+
+  const onTripGpsError = (error) => {
+    setTrip((prev) => prev && {
+      ...prev,
+      gpsError: error.code === 1 ? 'Location access is blocked. Allow location for this site to track your trip.' : 'Looking for GPS signal...',
+    });
+  };
+
+  const startTrip = () => {
+    if (!navigator.geolocation || elevation?.status !== 'ready') return;
+    setConfirmCancel(false);
+    setTrip({
+      route: elevation,
+      status: 'riding',
+      startedAt: Date.now(),
+      endedAt: null,
+      track: [],
+      distanceKm: 0,
+      speedKmh: 0,
+      progressIdx: 0,
+      lastFixAt: null,
+      you: null,
+      gpsError: null,
+    });
+    watchId.current = navigator.geolocation.watchPosition(onTripPosition, onTripGpsError, {
+      enableHighAccuracy: true,
+      maximumAge: 0,
+      timeout: 30000,
+    });
+    keepScreenOn();
+  };
+
+  const finishTrip = () => {
+    stopWatching();
+    setTrip((prev) => prev && { ...prev, status: 'done', endedAt: Date.now() });
+  };
+
+  const closeTrip = () => {
+    stopWatching();
+    setTrip(null);
+    setConfirmCancel(false);
+  };
+
+  const saveTrip = () => {
+    const minutes = Math.round((trip.endedAt - trip.startedAt) / 60000);
+    logRide({ distKm: Math.round(trip.distanceKm * 10) / 10, minutes, weather: tripWeather, terrain: tripTerrain });
+    closeTrip();
+    setActiveTab('tracker');
+  };
+
+  const formatClock = (ms) => {
+    const total = Math.max(0, Math.floor(ms / 1000));
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const sec = total % 60;
+    const pad = (n) => String(n).padStart(2, '0');
+    return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${pad(m)}:${pad(sec)}`;
+  };
+
   // Map, numbers and hill graph for the route being shown.
   const routeCard = elevation && (
     <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
@@ -748,6 +895,14 @@ function Tracker({ saved = {}, onDataChange, account }) {
           </div>
           <ElevationChart profile={elevation.profile} low={elevation.low} high={elevation.high} hover={routeHover} setHover={setRouteHover} />
           <p className="text-[10px] text-slate-500">Bike route from OpenStreetMap. Touch the hill graph to see that spot on the map.</p>
+          <button
+            type="button"
+            onClick={startTrip}
+            className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 py-3.5 px-4 rounded-xl font-black text-sm transition-all active:scale-95 shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2"
+          >
+            <Play className="w-4 h-4 fill-slate-950" />
+            <span>Start trip</span>
+          </button>
         </>
       )}
     </div>
@@ -817,6 +972,136 @@ function Tracker({ saved = {}, onDataChange, account }) {
   const tireStatus = getProgressProps(totalTireKm, MAX_TIRE_KM);
   const gearStatus = getProgressProps(totalGearKm, MAX_GEAR_KM);
   const brakeStatus = getProgressProps(totalBrakeKm, MAX_BRAKE_KM);
+
+  if (trip) {
+    const route = trip.route;
+    const riding = trip.status === 'riding';
+    const elapsedMs = (trip.endedAt ?? Date.now()) - trip.startedAt;
+    const progressKm = route.profile[trip.progressIdx]?.km ?? 0;
+    const avgKmh = elapsedMs > 0 ? trip.distanceKm / (elapsedMs / 3600000) : 0;
+    const canSave = trip.distanceKm >= 0.1;
+    const stats = riding
+      ? [
+          ['Time', formatClock(elapsedMs)],
+          ['Ridden', `${trip.distanceKm.toFixed(2)} km`],
+          ['Speed', `${trip.speedKmh.toFixed(1)} km/h`],
+          ['Route', `${progressKm.toFixed(1)} / ${route.distanceKm.toFixed(1)} km`],
+        ]
+      : [
+          ['Time', formatClock(elapsedMs)],
+          ['Ridden', `${trip.distanceKm.toFixed(2)} km`],
+          ['Avg speed', `${avgKmh.toFixed(1)} km/h`],
+          ['XP', `+${Math.round(trip.distanceKm)} XP`],
+        ];
+    const choice = (value, current, set, label) => (
+      <button
+        key={value}
+        type="button"
+        onClick={() => set(value)}
+        className={`flex-1 py-2.5 rounded-xl text-xs font-bold border transition-colors ${current === value ? 'bg-emerald-500 text-slate-950 border-emerald-400' : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'}`}
+      >
+        {label}
+      </button>
+    );
+
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 font-sans pb-16">
+        <div className="max-w-md mx-auto p-4 md:pt-6 space-y-4">
+          <header className="flex items-center justify-between pt-2">
+            <div className="flex items-center gap-2.5">
+              {riding ? (
+                <span className="relative flex w-3 h-3">
+                  <span className="absolute inset-0 rounded-full bg-emerald-400 opacity-75 animate-ping" />
+                  <span className="relative rounded-full w-3 h-3 bg-emerald-500" />
+                </span>
+              ) : (
+                <Flag className="w-5 h-5 text-emerald-400" />
+              )}
+              <h1 className="text-lg font-extrabold uppercase tracking-tight font-mono text-white">
+                {riding ? 'Trip in progress' : 'Trip finished'}
+              </h1>
+            </div>
+            <span className="text-2xl font-black font-mono text-emerald-400 tabular-nums">{formatClock(elapsedMs)}</span>
+          </header>
+
+          <RouteMap line={route.line} track={trip.track} you={riding ? trip.you : null} />
+
+          <div className="grid grid-cols-2 gap-2 font-mono">
+            {stats.map(([label, value]) => (
+              <div key={label} className="bg-slate-900 rounded-xl p-3 border border-slate-800 min-w-0">
+                <div className="text-[10px] uppercase tracking-wider text-slate-500">{label}</div>
+                <div className="text-lg font-black text-white tabular-nums whitespace-nowrap">{value}</div>
+              </div>
+            ))}
+          </div>
+
+          {riding && (
+            <>
+              {(trip.gpsError || !trip.you) && (
+                <p className="text-xs rounded-xl p-3 border bg-amber-500/10 border-amber-500/30 text-amber-200">
+                  {trip.gpsError || 'Looking for GPS signal...'}
+                </p>
+              )}
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-3">
+                <ElevationChart profile={route.profile} low={route.low} high={route.high} hover={trip.progressIdx} setHover={() => {}} />
+              </div>
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                Keep this page open and the screen on. Phones stop sending GPS to web pages when the screen is off.
+              </p>
+              <button
+                type="button"
+                onClick={finishTrip}
+                className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 py-4 rounded-2xl font-black text-base transition-all active:scale-95 shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2"
+              >
+                <Flag className="w-5 h-5" /> Finish trip
+              </button>
+              <button
+                type="button"
+                onClick={() => (confirmCancel ? closeTrip() : setConfirmCancel(true))}
+                className="w-full text-xs text-slate-400 hover:text-rose-300 py-2"
+              >
+                {confirmCancel ? 'Tap again to cancel the trip (nothing is saved)' : 'Cancel trip'}
+              </button>
+            </>
+          )}
+
+          {!riding && (
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-4">
+              <div className="space-y-2">
+                <div className="text-xs font-semibold uppercase tracking-wider text-slate-400 font-mono">{t.weatherLabel}</div>
+                <div className="flex gap-2">
+                  {choice('dry', tripWeather, setTripWeather, `☀️ ${t.dry}`)}
+                  {choice('rain', tripWeather, setTripWeather, `🌧️ ${t.rain}`)}
+                </div>
+              </div>
+              <div className="space-y-2">
+                <div className="text-xs font-semibold uppercase tracking-wider text-slate-400 font-mono">{t.terrainLabel}</div>
+                <div className="flex gap-2">
+                  {choice('asphalt', tripTerrain, setTripTerrain, `🛣 ${t.asphalt}`)}
+                  {choice('gravel', tripTerrain, setTripTerrain, `🪨 ${t.gravel}`)}
+                  {choice('mud', tripTerrain, setTripTerrain, `🤎 ${t.mud}`)}
+                </div>
+              </div>
+              {canSave ? (
+                <button
+                  type="button"
+                  onClick={saveTrip}
+                  className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 py-3.5 rounded-xl font-black text-sm transition-all active:scale-95"
+                >
+                  Save ride (+{Math.round(trip.distanceKm)} XP)
+                </button>
+              ) : (
+                <p className="text-xs text-slate-400">This trip was too short to save (under 0.1 km).</p>
+              )}
+              <button type="button" onClick={closeTrip} className="w-full text-xs text-slate-400 hover:text-rose-300 py-1">
+                Don't save
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-emerald-500 selection:text-slate-950 pb-16">

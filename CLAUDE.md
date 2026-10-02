@@ -70,6 +70,14 @@ words). Keep replies short.
     credit), distance/climb/descent/highest, and `ElevationChart`. Touching the
     chart marks that spot on the map. It renders under whichever planner made
     the route (`routeSource`).
+  - Start trip: the route card's "Start trip" button starts live tracking
+    (`trip` state, `navigator.geolocation.watchPosition`, screen wake lock).
+    While a trip exists, `Tracker` renders the trip screen instead of the
+    normal app: map with your track (amber) and position (blue), time, km
+    ridden, speed, progress along the route, hill chart. Fixes worse than 35 m,
+    steps under 8 m, and jumps faster than 90 km/h are ignored. "Finish trip"
+    → pick weather/terrain → `logRide` saves it like a normal ride (same as the
+    ride form). Web pages only get GPS while the screen is on.
 
 ## Checking changes
 
