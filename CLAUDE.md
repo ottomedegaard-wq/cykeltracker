@@ -26,8 +26,17 @@ words). Keep replies short.
   UI labels live in the `TEXT` object (aliased as `t` in the component);
   one-off messages can be inline English. All distances are km; display via
   `formatDist` / `formatDistNum` (rounded to 1 decimal).
-- **No persistence yet.** State is in-memory `useState` only; storage is a
-  planned later step.
+- **Accounts & saving (Supabase).** `App` (bottom of the file) handles login
+  and saving; `Tracker` is the actual app UI. Talks to Supabase with plain
+  `fetch` (Auth REST + PostgREST), no supabase-js. One table `profiles`
+  (`id` = auth user id, `data` jsonb with the whole profile) protected by
+  row-level security; the SQL is in the comment above `SUPABASE_URL`. Login
+  session is kept in localStorage and refreshed before it expires. `Tracker`
+  starts its state from `saved` and reports changes via `onDataChange`; `App`
+  saves ~1 s later. If you add a new field that should be saved, add it to the
+  `useState(saved.x ?? …)` pattern and to the `onDataChange` object. With
+  `SUPABASE_URL`/`SUPABASE_ANON_KEY` empty, the app runs without login and
+  saves nothing.
 
 ## Features to preserve
 

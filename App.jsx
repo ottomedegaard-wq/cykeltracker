@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   Settings, 
   Droplets, 
@@ -19,7 +19,9 @@ import {
   Navigation,
   Timer,
   Gauge,
-  Flame
+  Flame,
+  LogOut,
+  Cloud
 } from 'lucide-react';
 
 const TEXT = {
@@ -376,39 +378,39 @@ function ElevationChart({ profile, low, high, hover, setHover }) {
   );
 }
 
-export default function App() {
+function Tracker({ saved = {}, onDataChange, account }) {
   const t = TEXT;
 
   const [activeTab, setActiveTab] = useState('tracker');
-  const [profileName, setProfileName] = useState('');
+  const [profileName, setProfileName] = useState(saved.profileName ?? '');
 
   // Maintenance States
-  const [totalChainKm, setTotalChainKm] = useState(0);
-  const [totalTireKm, setTotalTireKm] = useState(0);
-  const [totalGearKm, setTotalGearKm] = useState(0);
-  const [totalBrakeKm, setTotalBrakeKm] = useState(0);
-  const [totalDistanceRidden, setTotalDistanceRidden] = useState(0);
-  const [totalTimeMinutes, setTotalTimeMinutes] = useState(0);
-  const [rainRidesCount, setRainRidesCount] = useState(0);
-  const [chainCleanCount, setChainCleanCount] = useState(0);
-  const [tireChangeCount, setTireChangeCount] = useState(0);
-  const [gearChangeCount, setGearChangeCount] = useState(0);
-  const [brakeCheckCount, setBrakeCheckCount] = useState(0);
+  const [totalChainKm, setTotalChainKm] = useState(saved.totalChainKm ?? 0);
+  const [totalTireKm, setTotalTireKm] = useState(saved.totalTireKm ?? 0);
+  const [totalGearKm, setTotalGearKm] = useState(saved.totalGearKm ?? 0);
+  const [totalBrakeKm, setTotalBrakeKm] = useState(saved.totalBrakeKm ?? 0);
+  const [totalDistanceRidden, setTotalDistanceRidden] = useState(saved.totalDistanceRidden ?? 0);
+  const [totalTimeMinutes, setTotalTimeMinutes] = useState(saved.totalTimeMinutes ?? 0);
+  const [rainRidesCount, setRainRidesCount] = useState(saved.rainRidesCount ?? 0);
+  const [chainCleanCount, setChainCleanCount] = useState(saved.chainCleanCount ?? 0);
+  const [tireChangeCount, setTireChangeCount] = useState(saved.tireChangeCount ?? 0);
+  const [gearChangeCount, setGearChangeCount] = useState(saved.gearChangeCount ?? 0);
+  const [brakeCheckCount, setBrakeCheckCount] = useState(saved.brakeCheckCount ?? 0);
 
-  const [kmSinceLastClean, setKmSinceLastClean] = useState(0);
+  const [kmSinceLastClean, setKmSinceLastClean] = useState(saved.kmSinceLastClean ?? 0);
   const [cleanErrorMsg, setCleanErrorMsg] = useState(null);
 
-  const [kmSinceLastTireChange, setKmSinceLastTireChange] = useState(0);
+  const [kmSinceLastTireChange, setKmSinceLastTireChange] = useState(saved.kmSinceLastTireChange ?? 0);
   const [tireErrorMsg, setTireErrorMsg] = useState(null);
 
-  const [kmSinceLastGearChange, setKmSinceLastGearChange] = useState(0);
+  const [kmSinceLastGearChange, setKmSinceLastGearChange] = useState(saved.kmSinceLastGearChange ?? 0);
   const [gearErrorMsg, setGearErrorMsg] = useState(null);
 
-  const [kmSinceLastBrakeCheck, setKmSinceLastBrakeCheck] = useState(0);
+  const [kmSinceLastBrakeCheck, setKmSinceLastBrakeCheck] = useState(saved.kmSinceLastBrakeCheck ?? 0);
   const [brakeErrorMsg, setBrakeErrorMsg] = useState(null);
   
-  const [rideHistory, setRideHistory] = useState([]);
-  const [xp, setXp] = useState(0);
+  const [rideHistory, setRideHistory] = useState(saved.rideHistory ?? []);
+  const [xp, setXp] = useState(saved.xp ?? 0);
 
   // New Ride Form States
   const [distance, setDistance] = useState("");
@@ -710,6 +712,12 @@ export default function App() {
     }
   };
 
+  // Everything that belongs to the rider's profile. Sent to the parent so it
+  // can be saved online whenever something changes.
+  useEffect(() => {
+    onDataChange?.({ profileName, totalChainKm, totalTireKm, totalGearKm, totalBrakeKm, totalDistanceRidden, totalTimeMinutes, rainRidesCount, chainCleanCount, tireChangeCount, gearChangeCount, brakeCheckCount, kmSinceLastClean, kmSinceLastTireChange, kmSinceLastGearChange, kmSinceLastBrakeCheck, rideHistory, xp });
+  }, [profileName, totalChainKm, totalTireKm, totalGearKm, totalBrakeKm, totalDistanceRidden, totalTimeMinutes, rainRidesCount, chainCleanCount, tireChangeCount, gearChangeCount, brakeCheckCount, kmSinceLastClean, kmSinceLastTireChange, kmSinceLastGearChange, kmSinceLastBrakeCheck, rideHistory, xp]);
+
   // Map, numbers and hill graph for the route being shown.
   const routeCard = elevation && (
     <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
@@ -834,6 +842,24 @@ export default function App() {
             </div>
           </div>
         </header>
+
+        {account && (
+          <div className="flex items-center justify-between gap-2 bg-slate-900 border border-slate-800 rounded-2xl px-3.5 py-2 text-xs">
+            <div className="flex items-center gap-2 min-w-0">
+              <Cloud className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span className="text-slate-300 truncate">{account.email}</span>
+              <span className={`shrink-0 font-mono ${account.saveStatus === 'error' ? 'text-rose-300' : 'text-slate-500'}`}>
+                {account.saveStatus === 'saving' ? 'Saving...' : account.saveStatus === 'error' ? 'Not saved!' : 'Saved'}
+              </span>
+            </div>
+            <button
+              onClick={account.onLogout}
+              className="flex items-center gap-1 text-slate-400 hover:text-rose-300 font-bold shrink-0"
+            >
+              <LogOut className="w-3.5 h-3.5" /> Log out
+            </button>
+          </div>
+        )}
 
         {/* Navigation Tabs */}
         <div className="grid grid-cols-2 gap-2 bg-slate-900 p-1.5 rounded-2xl border border-slate-800">
@@ -1504,5 +1530,297 @@ export default function App() {
         )}
       </div>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Online accounts and saving (Supabase)
+//
+// Fill in the two values below from your Supabase project
+// (Project Settings -> API). The "anon public" key is meant to be public;
+// the database rules below make sure each person can only see their own data.
+// While they are empty the app runs without login and nothing is saved.
+//
+// Run this once in Supabase -> SQL Editor:
+//
+//   create table public.profiles (
+//     id uuid primary key references auth.users on delete cascade,
+//     data jsonb not null default '{}'::jsonb,
+//     updated_at timestamptz not null default now()
+//   );
+//   alter table public.profiles enable row level security;
+//   create policy "Read own profile" on public.profiles
+//     for select using (auth.uid() = id);
+//   create policy "Create own profile" on public.profiles
+//     for insert with check (auth.uid() = id);
+//   create policy "Update own profile" on public.profiles
+//     for update using (auth.uid() = id) with check (auth.uid() = id);
+// ---------------------------------------------------------------------------
+const SUPABASE_URL = '';
+const SUPABASE_ANON_KEY = '';
+const CLOUD_ENABLED = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
+const SESSION_STORAGE_KEY = 'bike-tracker-session';
+
+const readStoredSession = () => {
+  try {
+    return JSON.parse(localStorage.getItem(SESSION_STORAGE_KEY));
+  } catch {
+    return null;
+  }
+};
+
+const storeSession = (session) => {
+  try {
+    if (session) localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+    else localStorage.removeItem(SESSION_STORAGE_KEY);
+  } catch {
+    // Private mode etc.: you just have to log in again next time.
+  }
+};
+
+const supabaseFetch = async (path, { method = 'GET', body, token, headers = {} } = {}) => {
+  const res = await fetch(`${SUPABASE_URL}${path}`, {
+    method,
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...headers,
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const text = await res.text();
+  const data = text ? JSON.parse(text) : null;
+  if (!res.ok) {
+    throw new Error(data?.msg || data?.error_description || data?.message || `Error ${res.status}`);
+  }
+  return data;
+};
+
+// Supabase answers a login with tokens; keep what we need.
+const toSession = (data) => ({
+  accessToken: data.access_token,
+  refreshToken: data.refresh_token,
+  expiresAt: Math.floor(Date.now() / 1000) + (data.expires_in || 3600),
+  user: { id: data.user.id, email: data.user.email },
+});
+
+const cloud = {
+  async signUp(email, password) {
+    const data = await supabaseFetch('/auth/v1/signup', { method: 'POST', body: { email, password } });
+    // When e-mail confirmation is on, there is no login yet.
+    return data?.access_token ? toSession(data) : null;
+  },
+  async signIn(email, password) {
+    return toSession(await supabaseFetch('/auth/v1/token?grant_type=password', { method: 'POST', body: { email, password } }));
+  },
+  async signOut(session) {
+    try {
+      await supabaseFetch('/auth/v1/logout', { method: 'POST', token: session.accessToken });
+    } catch {
+      // Logging out locally is enough.
+    }
+  },
+  // Login tokens expire after an hour; swap for a fresh one shortly before.
+  async freshSession(session) {
+    if (session.expiresAt - 60 > Date.now() / 1000) return session;
+    const next = toSession(await supabaseFetch('/auth/v1/token?grant_type=refresh_token', { method: 'POST', body: { refresh_token: session.refreshToken } }));
+    storeSession(next);
+    return next;
+  },
+  async loadProfile(session) {
+    const rows = await supabaseFetch(`/rest/v1/profiles?id=eq.${session.user.id}&select=data`, { token: session.accessToken });
+    return rows?.[0]?.data ?? {};
+  },
+  async saveProfile(session, data) {
+    await supabaseFetch('/rest/v1/profiles', {
+      method: 'POST',
+      token: session.accessToken,
+      headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+      body: { id: session.user.id, data, updated_at: new Date().toISOString() },
+    });
+  },
+};
+
+const inputClass = "w-full bg-slate-950 border border-slate-800 rounded-2xl px-4 py-3 text-white text-base font-semibold focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors placeholder:text-slate-500";
+
+function LoginScreen({ onLoggedIn }) {
+  const [mode, setMode] = useState('login'); // 'login' | 'signup'
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState(null); // { type: 'error' | 'info', text }
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (mode === 'signup' && password.length < 6) {
+      setMessage({ type: 'error', text: 'Password must be at least 6 characters.' });
+      return;
+    }
+    setBusy(true);
+    setMessage(null);
+    try {
+      if (mode === 'signup') {
+        const session = await cloud.signUp(email.trim(), password);
+        if (session) onLoggedIn(session);
+        else {
+          setMode('login');
+          setMessage({ type: 'info', text: 'Account created! Check your e-mail and click the link, then log in here.' });
+        }
+      } else {
+        onLoggedIn(await cloud.signIn(email.trim(), password));
+      }
+    } catch (err) {
+      const text = /invalid login/i.test(err.message) ? 'Wrong e-mail or password.'
+        : /not confirmed/i.test(err.message) ? 'Please click the link in your e-mail first.'
+        : /already registered/i.test(err.message) ? 'That e-mail already has an account. Log in instead.'
+        : `Something went wrong: ${err.message}`;
+      setMessage({ type: 'error', text });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans flex items-center justify-center p-4">
+      <div className="w-full max-w-sm space-y-6">
+        <div className="flex items-center gap-3 justify-center">
+          <div className="bg-emerald-500/10 p-2.5 rounded-2xl border border-emerald-500/30">
+            <Bike className="w-6 h-6 text-emerald-400" />
+          </div>
+          <h1 className="text-xl font-extrabold tracking-tight text-white uppercase font-mono">
+            Bike <span className="text-emerald-400">Tracker</span>
+          </h1>
+        </div>
+
+        <form onSubmit={submit} className="bg-slate-900 border border-slate-800 rounded-3xl p-5 space-y-4 shadow-xl">
+          <h2 className="text-lg font-bold text-white">{mode === 'login' ? 'Log in' : 'Create account'}</h2>
+          <div className="space-y-1.5">
+            <label htmlFor="login-email" className="block text-xs font-semibold uppercase tracking-wider text-slate-400 font-mono">E-mail</label>
+            <input id="login-email" type="email" required autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" className={inputClass} />
+          </div>
+          <div className="space-y-1.5">
+            <label htmlFor="login-password" className="block text-xs font-semibold uppercase tracking-wider text-slate-400 font-mono">Password</label>
+            <input id="login-password" type="password" required autoComplete={mode === 'login' ? 'current-password' : 'new-password'} value={password} onChange={(e) => setPassword(e.target.value)} placeholder={mode === 'signup' ? 'At least 6 characters' : ''} className={inputClass} />
+          </div>
+
+          {message && (
+            <p className={`text-xs leading-relaxed rounded-xl p-3 border ${message.type === 'error' ? 'bg-rose-500/15 border-rose-500/40 text-rose-200' : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200'}`}>
+              {message.text}
+            </p>
+          )}
+
+          <button type="submit" disabled={busy} className="w-full bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 py-3.5 rounded-2xl font-black text-sm transition-all active:scale-95">
+            {busy ? 'Please wait...' : mode === 'login' ? 'Log in' : 'Create account'}
+          </button>
+          <button
+            type="button"
+            onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setMessage(null); }}
+            className="w-full text-xs text-slate-400 hover:text-emerald-300"
+          >
+            {mode === 'login' ? 'New here? Create an account' : 'Already have an account? Log in'}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// Decides what to show: login screen, loading, or the tracker with the
+// rider's saved data. Saves changes online about a second after they happen.
+export default function App() {
+  const [session, setSession] = useState(() => (CLOUD_ENABLED ? readStoredSession() : null));
+  const [saved, setSaved] = useState(null); // the rider's data once loaded
+  const [loadError, setLoadError] = useState(null);
+  const [saveStatus, setSaveStatus] = useState('saved'); // 'saved' | 'saving' | 'error'
+  const sessionRef = useRef(session);
+  const saveTimer = useRef(null);
+  const loaded = useRef(false);
+
+  useEffect(() => {
+    sessionRef.current = session;
+    if (!session) return;
+    let cancelled = false;
+    loaded.current = false;
+    setSaved(null);
+    setLoadError(null);
+    (async () => {
+      try {
+        const fresh = await cloud.freshSession(session);
+        if (fresh !== session) {
+          if (!cancelled) setSession(fresh);
+          return; // runs again with the fresh session
+        }
+        const data = await cloud.loadProfile(fresh);
+        if (!cancelled) setSaved(data);
+      } catch (err) {
+        if (!cancelled) setLoadError(err.message);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [session?.accessToken]);
+
+  const handleLoggedIn = (next) => {
+    storeSession(next);
+    setSession(next);
+  };
+
+  const handleLogout = async () => {
+    clearTimeout(saveTimer.current);
+    const old = sessionRef.current;
+    storeSession(null);
+    setSession(null);
+    setSaved(null);
+    if (old) cloud.signOut(old);
+  };
+
+  const handleDataChange = (data) => {
+    if (!sessionRef.current) return;
+    // The first call is just the data we loaded; nothing new to save.
+    if (!loaded.current) {
+      loaded.current = true;
+      return;
+    }
+    setSaveStatus('saving');
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(async () => {
+      try {
+        const fresh = await cloud.freshSession(sessionRef.current);
+        sessionRef.current = fresh;
+        await cloud.saveProfile(fresh, data);
+        setSaveStatus('saved');
+      } catch {
+        setSaveStatus('error');
+      }
+    }, 1000);
+  };
+
+  if (!CLOUD_ENABLED) return <Tracker />;
+  if (!session) return <LoginScreen onLoggedIn={handleLoggedIn} />;
+
+  if (loadError || !saved) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 font-sans flex items-center justify-center p-4">
+        <div className="text-center space-y-3 max-w-sm">
+          {loadError ? (
+            <>
+              <p className="text-sm text-rose-200">Could not load your data. Check your internet and try again.</p>
+              <button onClick={handleLogout} className="text-xs text-slate-400 hover:text-emerald-300 underline">Log out</button>
+            </>
+          ) : (
+            <p className="text-sm text-slate-400">Loading your rides...</p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <Tracker
+      key={session.user.id}
+      saved={saved}
+      onDataChange={handleDataChange}
+      account={{ email: session.user.email, saveStatus, onLogout: handleLogout }}
+    />
   );
 }
