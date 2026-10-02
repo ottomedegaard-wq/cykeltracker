@@ -1537,7 +1537,8 @@ function Tracker({ saved = {}, onDataChange, account }) {
 // Online accounts and saving (Supabase)
 //
 // Fill in the two values below from your Supabase project
-// (Project Settings -> API). The "anon public" key is meant to be public;
+// (Connect button / Project Settings -> API). The publishable ("anon") key is
+// meant to be public;
 // the database rules below make sure each person can only see their own data.
 // While they are empty the app runs without login and nothing is saved.
 //
@@ -1556,8 +1557,8 @@ function Tracker({ saved = {}, onDataChange, account }) {
 //   create policy "Update own profile" on public.profiles
 //     for update using (auth.uid() = id) with check (auth.uid() = id);
 // ---------------------------------------------------------------------------
-const SUPABASE_URL = '';
-const SUPABASE_ANON_KEY = '';
+const SUPABASE_URL = 'https://iribtgeqwlyxsegcryax.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_aiJ2orAWa_RHcphT2sdl4w_uB5aqptw'; // publishable key: safe to be public
 const CLOUD_ENABLED = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 const SESSION_STORAGE_KEY = 'bike-tracker-session';
 
